@@ -1,25 +1,16 @@
 #include <iostream>
 
 #define tNum 2
+#define RECORD_SIZE 10
+#define OPERATION_SET 2
 
 class Record
 {
 public:
     int value;
-    int xlock;
-    int slock;
-    int lock;
+    Lock lock;
 
     Record() : value(-1)
-    {
-    }
-    Record() : xlock(0)
-    {
-    }
-    Record() : slock(0)
-    {
-    }
-    Record() : lock(0)
     {
     }
 };
@@ -27,7 +18,7 @@ public:
 class Database
 {
 public:
-    Record record[10];
+    Record record[RECORD_SIZE];
 };
 Database *db;
 
@@ -50,44 +41,57 @@ public:
     }
 };
 
-int CompareAndSwap(int *ptr, int expected, int update)
+class Lock
 {
-    int original = *ptr;
-    if (original == expected)
-        *ptr = update;
-    return original;
-}
+public:
+    int flag;
+    Lock() : flag(0)
+    {
+    }
 
-int sCompareAndSwap(int *ptr, int expected)
-{
-    int original = *ptr;
-    if (original <= expected)
-        *ptr--;
-    return original;
-}
+    int CompareAndSwap(int *ptr, int expected, int update)
+    {
+        int original = *ptr;
 
-void cas_lock(int *lock)
-{
-    while (CompareAndSwap(lock, 0, 1) != 0)
-        ;
-}
+        if (original == expected)
+            *ptr = update;
 
-void cas_slock(int *lock)
-{
-    while (sCompareAndSwap(lock, 0) == 1)
-        ;
-}
+        return original;
+    }
 
-void updateLock(int *lock)
-{
-    while (CompareAndSwap(lock, -1, 1) != -1)
-        ;
-}
+    int sCompareAndSwap(int *ptr, int expected)
+    {
+        int original = *ptr;
 
-void unlock(Record *record)
-{
-    record->lock = 0;
-}
+        if (original <= expected)
+            *ptr--;
+
+        return original;
+    }
+
+    void cas_lock()
+    {
+        while (CompareAndSwap(&flag, 0, 1) != 0)
+            ;
+    }
+
+    void cas_slock()
+    {
+        while (sCompareAndSwap(&flag, 0) == 1)
+            ;
+    }
+
+    void updateLock()
+    {
+        while (CompareAndSwap(&flag, -1, 1) != -1)
+            ;
+    }
+
+    void unlock()
+    {
+        flag = 0;
+    }
+};
 
 class Transaction
 {
@@ -95,7 +99,7 @@ public:
     void read(int dataItem)
     {
         // lock
-        cas_slock(&db->record[dataItem].lock);
+        db->record[dataItem].lock.cas_slock();
         //printf("lets read: %d\n", db->record[dataItem].value);
         std::cout << "lets read: " << db->record[dataItem].value << std::endl;
     }
@@ -104,11 +108,11 @@ public:
     {
         if (update == 1)
         {
-            updateLock(&db->record[dataItem].lock);
+            db->record[dataItem].lock.updateLock();
         }
         else
         {
-            cas_lock(&db->record[dataItem].lock);
+            db->record[dataItem].lock.cas_lock();
         }
         db->record[dataItem].value = 1;
     }
@@ -118,10 +122,10 @@ void *doTransaction(void *ops)
 {
     Task **opts = (Task **)ops;
     Transaction t;
-    int access[10];
+    int access[RECORD_SIZE];
 
     // growing phase
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < OPERATION_SET; i++)
     {
         Task *op = opts[i];
 
@@ -136,9 +140,9 @@ void *doTransaction(void *ops)
         }
     }
     // unlock
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < OPERATION_SET; i++)
     {
-        unlock(&db->record[i]);
+        db->record[i].lock.unlock();
     }
     return NULL;
 }
@@ -165,7 +169,7 @@ int main()
     {
         pthread_join(p[i], NULL);
     }
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < RECORD_SIZE; i++)
     {
         std::cout << i << ":" << db->record[i].value << std::endl;
         // printf("[%d]: %d\n", i, db->record[i].value);
