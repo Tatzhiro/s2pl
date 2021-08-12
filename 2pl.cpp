@@ -1,45 +1,8 @@
 #include <iostream>
 
 #define tNum 2
-#define RECORD_SIZE 10
-#define OPERATION_SET 2
-
-class Record
-{
-public:
-    int value;
-    Lock lock;
-
-    Record() : value(-1)
-    {
-    }
-};
-
-class Database
-{
-public:
-    Record record[RECORD_SIZE];
-};
-Database *db;
-
-enum Operation
-{
-    READ,
-    WRITE
-};
-
-class Task
-{
-public:
-    Operation op;
-    int dataItem;
-
-    Task(Operation ope, int idx)
-    {
-        op = ope;
-        dataItem = idx;
-    }
-};
+#define RECORD_SIZE 20
+#define OPERATION_SET 10
 
 class Lock
 {
@@ -48,41 +11,18 @@ public:
     Lock() : flag(0)
     {
     }
-    /*
-    flag == 1, write locked;
-    flag == 0, not locked;
-    flag < 0, there are |$flag| readers who acquires read-lock.
-    */
-    int CompareAndSwap(int *ptr, int expected, int update)
-    {
-        int original = *ptr;
-
-        if (original == expected)
-            *ptr = update;
-
-        return original;
-    }
-
-    int sCompareAndSwap(int *ptr, int expected)
-    {
-        int original = *ptr;
-
-        if (original <= expected)
-            *ptr--;
-
-        return original;
-    }
-
     // exclusive lock
-    void cas_lock()
+    // flag is 1 when lock-X is held
+    void exclusiveLock()
     {
         int expected = 0;
         while (!__atomic_compare_exchange_n(&flag, &expected, 1, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
             ;
     }
 
-    // shared lock 困った
-    void cas_slock()
+    // shared lock
+    // flag is -(number of readers) when shared lock is held
+    void sharedLock()
     {
         while (true)
         {
@@ -106,18 +46,37 @@ public:
 
     void updateLock()
     {
-        while (CompareAndSwap(&flag, -1, 1) != -1)
+        int expected = -1;
+        while (!__atomic_compare_exchange_n(&flag, &expected, 1, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
             ;
     }
 
-    void unlock()
+    void unlock(bool read)
     {
-        if (flag < 0)
-            flag++;
+        if (read)
+            __atomic_add_fetch(&flag, 1, __ATOMIC_SEQ_CST);
         else
-            flag = 0;
+            __atomic_store_n(&flag, 0, __ATOMIC_SEQ_CST);
     }
 };
+
+class Record
+{
+public:
+    int value;
+    Lock lock;
+
+    Record() : value(-1)
+    {
+    }
+};
+
+class Database
+{
+public:
+    Record record[RECORD_SIZE];
+};
+Database *db;
 
 class Transaction
 {
@@ -125,7 +84,7 @@ public:
     void read(int dataItem)
     {
         // lock
-        db->record[dataItem].lock.cas_slock();
+        db->record[dataItem].lock.sharedLock();
         //printf("lets read: %d\n", db->record[dataItem].value);
         std::cout << "lets read: " << db->record[dataItem].value << std::endl;
     }
@@ -138,9 +97,28 @@ public:
         }
         else
         {
-            db->record[dataItem].lock.cas_lock();
+            db->record[dataItem].lock.exclusiveLock();
         }
         db->record[dataItem].value = 1;
+    }
+};
+
+enum Operation
+{
+    READ,
+    WRITE
+};
+
+class Task
+{
+public:
+    Operation op;
+    int dataItem;
+
+    Task(Operation ope, int idx)
+    {
+        op = ope;
+        dataItem = idx;
     }
 };
 
@@ -167,9 +145,9 @@ void *doTransaction(void *ops)
         }
     }
     // unlock
-    for (int i = 0; i < OPERATION_SET; i++)
+    for (int i = 0; i < RECORD_SIZE; i++)
     {
-        db->record[i].lock.unlock();
+        db->record[i].lock.unlock(access[i]);
     }
     return NULL;
 }
@@ -178,11 +156,33 @@ int main()
 {
     db = new Database();
     Task *opt[tNum][OPERATION_SET] = {
-        {new Task(READ, 0),
-         new Task(WRITE, 1)},
+        {
+            // same operation cannot be generated
+            // write read to same data cannot happen
+            new Task(READ, 0),
+            new Task(WRITE, 0),
+            new Task(READ, 1),
+            new Task(WRITE, 1),
+            new Task(READ, 2),
+            new Task(WRITE, 2),
+            new Task(READ, 3),
+            new Task(WRITE, 3),
+            new Task(READ, 4),
+            new Task(WRITE, 4),
+        },
 
-        {new Task(READ, 1),
-         new Task(WRITE, 0)},
+        {
+            new Task(READ, 5),
+            new Task(WRITE, 5),
+            new Task(READ, 6),
+            new Task(WRITE, 6),
+            new Task(READ, 7),
+            new Task(WRITE, 7),
+            new Task(READ, 8),
+            new Task(WRITE, 8),
+            new Task(READ, 9),
+            new Task(WRITE, 9),
+        },
     };
 
     pthread_t p[tNum];

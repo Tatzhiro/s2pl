@@ -2,6 +2,25 @@
   "files.associations": {
     "__mutex_base": "cpp",
     "mutex": "cpp",
-    "memory": "cpp"
+    "memory": "cpp",
+    "__functional_base": "cpp",
+    "__functional_base_03": "cpp",
+    "__hash_table": "cpp",
+    "__tuple": "cpp",
+    "algorithm": "cpp",
+    "array": "cpp",
+    "chrono": "cpp",
+    "compare": "cpp",
+    "cstddef": "cpp",
+    "type_traits": "cpp",
+    "functional": "cpp",
+    "iterator": "cpp",
+    "limits": "cpp",
+    "random": "cpp",
+    "ratio": "cpp",
+    "tuple": "cpp",
+    "utility": "cpp",
+    "istream": "cpp",
+    "ostream": "cpp"
   }
 }
