@@ -48,7 +48,11 @@ public:
     Lock() : flag(0)
     {
     }
-
+    /*
+    flag == 1, write locked;
+    flag == 0, not locked;
+    flag < 0, there are |$flag| readers who acquires read-lock.
+    */
     int CompareAndSwap(int *ptr, int expected, int update)
     {
         int original = *ptr;
@@ -69,16 +73,35 @@ public:
         return original;
     }
 
+    // exclusive lock
     void cas_lock()
     {
-        while (CompareAndSwap(&flag, 0, 1) != 0)
+        int expected = 0;
+        while (!__atomic_compare_exchange_n(&flag, &expected, 1, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST))
             ;
     }
 
+    // shared lock 困った
     void cas_slock()
     {
-        while (sCompareAndSwap(&flag, 0) == 1)
-            ;
+        while (true)
+        {
+            int my_flag = __atomic_load_n(&flag, __ATOMIC_SEQ_CST);
+
+            if (my_flag <= 0)
+            {
+                if (__atomic_compare_exchange_n(
+                        &flag,
+                        &my_flag,
+                        my_flag - 1,
+                        false,
+                        __ATOMIC_SEQ_CST,
+                        __ATOMIC_SEQ_CST))
+                {
+                    break;
+                };
+            }
+        }
     }
 
     void updateLock()
@@ -89,7 +112,10 @@ public:
 
     void unlock()
     {
-        flag = 0;
+        if (flag < 0)
+            flag++;
+        else
+            flag = 0;
     }
 };
 
@@ -122,6 +148,7 @@ void *doTransaction(void *ops)
 {
     Task **opts = (Task **)ops;
     Transaction t;
+    // used for updates
     int access[RECORD_SIZE];
 
     // growing phase
@@ -150,7 +177,7 @@ void *doTransaction(void *ops)
 int main()
 {
     db = new Database();
-    Task *opt[2][2] = {
+    Task *opt[tNum][OPERATION_SET] = {
         {new Task(READ, 0),
          new Task(WRITE, 1)},
 
